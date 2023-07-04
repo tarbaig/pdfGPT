@@ -4,15 +4,18 @@ import shutil
 import urllib.request
 from pathlib import Path
 from tempfile import NamedTemporaryFile
+from typing import List, Dict
 
 import fitz
 import numpy as np
 import openai
 import tensorflow_hub as hub
 from fastapi import UploadFile
-from lcserve import serving
-from sklearn.neighbors import NearestNeighbors
 
+from sklearn.neighbors import NearestNeighbors
+from fastapi import FastAPI
+
+app = FastAPI()
 
 recommender = None
 
@@ -67,7 +70,7 @@ def text_to_chunks(texts, word_length=150, start_page=1):
 
 class SemanticSearch:
     def __init__(self):
-        self.use = hub.load('https://tfhub.dev/google/universal-sentence-encoder/4')
+        self.use = hub.load('./USE')
         self.fitted = False
 
     def fit(self, data, batch=1000, n_neighbors=5):
@@ -97,13 +100,16 @@ class SemanticSearch:
         return embeddings
 
 
-def load_recommender(path, start_page=1):
+def load_recommender(paths, start_page=1):
     global recommender
     if recommender is None:
         recommender = SemanticSearch()
 
-    texts = pdf_to_text(path, start_page=start_page)
-    chunks = text_to_chunks(texts, start_page=start_page)
+    chunks : List[str] = []
+    for p in paths:
+        texts = pdf_to_text(p, start_page=start_page)
+        p_chunks = text_to_chunks(texts, start_page=start_page)
+        chunks.extend(p_chunks)
     recommender.fit(chunks)
     return 'Corpus Loaded.'
 
@@ -149,15 +155,15 @@ def generate_answer(question, openAI_key):
 
 
 def load_openai_key() -> str:
-    key = os.environ.get("OPENAI_API_KEY")
-    if key is None:
-        raise ValueError(
-            "[ERROR]: Please pass your OPENAI_API_KEY. Get your key here : https://platform.openai.com/account/api-keys"
-        )
-    return key
+    # key = os.environ.get("OPENAI_API_KEY")
+    # if key is None:
+    #     raise ValueError(
+    #         "[ERROR]: Please pass your OPENAI_API_KEY. Get your key here : https://platform.openai.com/account/api-keys"
+    #     )
+    return "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"
 
 
-@serving
+@app.post("/ask_url")
 def ask_url(url: str, question: str):
     download_pdf(url, 'corpus.pdf')
     load_recommender('corpus.pdf')
@@ -165,13 +171,16 @@ def ask_url(url: str, question: str):
     return generate_answer(question, openAI_key)
 
 
-@serving
-async def ask_file(file: UploadFile, question: str) -> str:
-    suffix = Path(file.filename).suffix
-    with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = Path(tmp.name)
+@app.post("/ask_file")
+async def ask_file(files: List[UploadFile], question: str) -> str:
 
-    load_recommender(str(tmp_path))
+    temp_paths : List[Path] = []
+    for f,file in files.items():
+        suffix = Path(file.filename).suffix
+        with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            temp_paths.append(Path(tmp.name))
+
+    load_recommender([str(tmp_path) for tmp_path in temp_paths])
     openAI_key = load_openai_key()
     return generate_answer(question, openAI_key)

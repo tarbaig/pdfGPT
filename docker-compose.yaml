@@ -6,10 +6,14 @@ services:
       context: . 
       target: langchain-serve-img
     ports:
-      - '8080:8080'
+      - '8000:8000'
+    network_mode: "host"
   pdf-gpt:
+    environment:
+      OPENAI_API_KEY: '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'
     build:
       context: . 
       target: pdf-gpt-img
     ports:
       - '7860:7860'
+    network_mode: "host"

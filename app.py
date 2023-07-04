@@ -1,24 +1,29 @@
 import json
+import logging
+from contextlib import ExitStack
 from tempfile import _TemporaryFileWrapper
+from typing import List
 
 import gradio as gr
 import requests
 
+from logging_context import debug_requests
+
+logger = logging.getLogger(__name__)
 
 def ask_api(
     lcserve_host: str,
     url: str,
-    file: _TemporaryFileWrapper,
+    files: List[_TemporaryFileWrapper],
     question: str,
-    openAI_key: str,
 ) -> str:
     if not lcserve_host.startswith('http'):
         return '[ERROR]: Invalid API Host'
 
-    if url.strip() == '' and file == None:
+    if url.strip() == '' and len(files) == 0 :
         return '[ERROR]: Both URL and PDF is empty. Provide at least one.'
 
-    if url.strip() != '' and file != None:
+    if url.strip() != '' and len(files) != 0:
         return '[ERROR]: Both URL and PDF is provided. Please provide only one (either URL or PDF).'
 
     if question.strip() == '':
@@ -26,9 +31,6 @@ def ask_api(
 
     _data = {
         'question': question,
-        'envs': {
-            'OPENAI_API_KEY': openAI_key,
-        },
     }
 
     if url.strip() != '':
@@ -38,17 +40,21 @@ def ask_api(
         )
 
     else:
-        with open(file.name, 'rb') as f:
+        with ExitStack() as stack:
+            fs = {"files" : (f.name , stack.enter_context(open(f.name,'rb'))) for f in files }
+            stack.enter_context(debug_requests())
             r = requests.post(
-                f'{lcserve_host}/ask_file',
-                params={'input_data': json.dumps(_data)},
-                files={'file': f},
-            )
+                    f'{lcserve_host}/ask_file',
+                    params=_data,
+                    files=fs,
+                )
 
     if r.status_code != 200:
         raise ValueError(f'[ERROR]: {r.text}')
+    logger.error(r)
+    logger.error(r.text)
 
-    return r.json()['result']
+    return r.text
 
 
 title = 'PDF GPT'
@@ -68,13 +74,11 @@ with gr.Blocks() as demo:
             gr.Markdown(
                 '<p style="text-align:center">Get your Open AI API key <a href="https://platform.openai.com/account/api-keys">here</a></p>'
             )
-            openAI_key = gr.Textbox(
-                label='Enter your OpenAI API key here', type='password'
-            )
+
             pdf_url = gr.Textbox(label='Enter PDF URL here')
             gr.Markdown("<center><h4>OR<h4></center>")
-            file = gr.File(
-                label='Upload your PDF/ Research Paper / Book here', file_types=['.pdf']
+            files = gr.File(
+                label='Upload your PDF/ Research Paper / Book here', file_types=['.pdf'], file_count='multiple'
             )
             question = gr.Textbox(label='Enter your question here')
             btn = gr.Button(value='Submit')
@@ -85,10 +89,10 @@ with gr.Blocks() as demo:
 
         btn.click(
             ask_api,
-            inputs=[lcserve_host, pdf_url, file, question, openAI_key],
+            inputs=[lcserve_host, pdf_url, files, question],
             outputs=[answer],
         )
 
-demo.app.server.timeout = 60000 # Set the maximum return time for the results of accessing the upstream server
+#demo.app.server.timeout = 60000 # Set the maximum return time for the results of accessing the upstream server
 
-demo.launch(server_port=7860, enable_queue=True) # `enable_queue=True` to ensure the validity of multi-user requests
+demo.launch(server_port=7860, enable_queue=True,) # `enable_queue=True` to ensure the validity of multi-user requests
