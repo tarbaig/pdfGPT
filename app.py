@@ -42,7 +42,6 @@ def ask_api(
     else:
         with ExitStack() as stack:
             fs = {"files" : (f.name , stack.enter_context(open(f.name,'rb'))) for f in files }
-            stack.enter_context(debug_requests())
             r = requests.post(
                     f'{lcserve_host}/ask_file',
                     params=_data,

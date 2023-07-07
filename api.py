@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import shutil
@@ -10,15 +11,19 @@ import fitz
 import numpy as np
 import openai
 import tensorflow_hub as hub
-from fastapi import UploadFile
+from fastapi import UploadFile, Form
 
 from sklearn.neighbors import NearestNeighbors
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
+
+from twilio.twiml.messaging_response import MessagingResponse
+from twilio.request_validator import RequestValidator
+from twilio.rest import Client
 
 app = FastAPI()
 
 recommender = None
-
+logger = logging.getLogger(__name__)
 
 def download_pdf(url, output_path):
     urllib.request.urlretrieve(url, output_path)
@@ -155,12 +160,12 @@ def generate_answer(question, openAI_key):
 
 
 def load_openai_key() -> str:
-    # key = os.environ.get("OPENAI_API_KEY")
-    # if key is None:
-    #     raise ValueError(
-    #         "[ERROR]: Please pass your OPENAI_API_KEY. Get your key here : https://platform.openai.com/account/api-keys"
-    #     )
-    return "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"
+    key = os.environ.get("OPENAI_API_KEY")
+    if key is None:
+        raise ValueError(
+            "[ERROR]: Please pass your OPENAI_API_KEY. Get your key here : https://platform.openai.com/account/api-keys"
+        )
+    return key
 
 
 @app.post("/ask_url")
@@ -175,7 +180,7 @@ def ask_url(url: str, question: str):
 async def ask_file(files: List[UploadFile], question: str) -> str:
 
     temp_paths : List[Path] = []
-    for f,file in files.items():
+    for file in files:
         suffix = Path(file.filename).suffix
         with NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             shutil.copyfileobj(file.file, tmp)
@@ -184,3 +189,24 @@ async def ask_file(files: List[UploadFile], question: str) -> str:
     load_recommender([str(tmp_path) for tmp_path in temp_paths])
     openAI_key = load_openai_key()
     return generate_answer(question, openAI_key)
+
+@app.post("/whatsapp_enndpoint")
+async def whats_app(
+         From: str = Form(...), To: str = Form(...), Body: str = Form(...)  ):
+    logger.error(From)
+    logger.error(To)
+    logger.error(Body)
+    openAI_key = load_openai_key()
+    ans = generate_answer(Body, openAI_key)
+    logger.error(ans)
+    account_sid = os.environ['TWILIO_ACCOUNT_SID']
+    auth_token = os.environ['TWILIO_AUTH_TOKEN']
+    client = Client(account_sid, auth_token)
+
+    message = client.messages.create(
+                              body=ans,
+                              from_=To,
+                              to=From
+                          )
+
+    print(message.sid)

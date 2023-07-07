@@ -7,11 +7,11 @@ WORKDIR /app
 COPY requirements.txt requirements.txt
 RUN pip3 install -r requirements.txt
 RUN pip3 install python-multipart
+RUN pip3 install twilio
 COPY . .
 CMD [ "uvicorn", "api:app", "--log-level", "info"]
 
 FROM python:3.9-slim-buster as pdf-gpt-img
-ENV OPENAI_API_KEY='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'
 RUN apt update && apt install -y gcc
 
 WORKDIR /app
